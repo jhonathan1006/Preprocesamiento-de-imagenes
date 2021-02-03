@@ -1,0 +1,121 @@
+---
+title: "Preprocesamiento de imagenes digitales"
+author: "Jhonathan Aponte Saravia"
+date: "3/2/2021"
+output: html_document
+---
+Este proceso intenta mostrar las pautas en R Markdonw en línea, de preprocesamiento de las imágenes digitales, la conversión de Nivel Digital (ND) a valores de radiancia, de valores a radiancia a valores de reflectancia, siendo este proceso de suma importancia para el procesamiento y análisis espectral de los objetos mediante las imágenes digitales. Para realizar este proceso se utilizaron imágenes Landsat 8,  que se encuentra disponible para el acceso en la pagina de Earth Explorer, así también, para la transformación y aplicación de las imágenes digitales han sido desarrolladas en el programa R Package y RStudio utilizando librerías básicas para el uso de los datos espaciales tales como: Raster, Rgdal, Sp, Rtoolbox,  y sobre todo se intenta aplicar funciones para reducir  el error en procesamiento de los datos, y de esta manera el procesamiento sea más amigable. 
+
+Para ello cargaremos los siguientes librerias 
+
+```{r}
+library(sp)
+library(raster)
+library(rgeos)
+library(rgdal)
+# importamos los datos raster 
+#E:\Datos vilca\sancarlos
+setwd("E:/Datos vilca/sancarlos")
+files <- list.files(pattern='.tif')
+files
+
+b1 <- raster("E:/Datos vilca/sancarlos/B1.tif")
+b2 <- raster("E:/Datos vilca/sancarlos/B2.tif")
+b3 <- raster("E:/Datos vilca/sancarlos/B3.tif")
+b4 <- raster("E:/Datos vilca/sancarlos/B4.tif")
+b5 <- raster("E:/Datos vilca/sancarlos/B5.tif")
+b6 <- raster("E:/Datos vilca/sancarlos/B6.tif")
+b7 <- raster("E:/Datos vilca/sancarlos/B7.tif")
+
+b4
+plot(b4)
+
+# Conversion de nivel digital a radiancia. 
+rad <- function(x1,x2,x3,x4,x5,x6,x7){ 
+  rb1 <- 0.012199*x1+ (-60.99626)
+  rb2 <- 0.012492*x2+(-62.46091)
+  rb3 <- 0.011511*x3+(-57.55720)
+  rb4 <- 0.009707*x4+(-48.53547)
+  rb5 <- 0.00594*x5+(-29.70129)
+  rb6 <- 0.001477*x6+(-7.38644)
+  rb7 <- 0.0004979*x7+(-2.48963)
+  return(list(rb1,rb2,rb3,rb4,rb5,rb6,rb7))
+}
+rabs<- stack(rad(b1,b2,b3,b4,b5,b6,b7))
+
+#Cálculo de distancia sol a tierra unidades astronomicas.
+dist<- function(j=217){
+  da <- (1-0.01672*cos(0.9856*(j-4)*(pi/180)))
+  return(da)}# ingresamos el valor del dia juliano en este caso es 217
+d<-dist()
+d
+#Cálculo de angulo cenital.
+ac <- function(t=47.612){
+  a <- cos((pi/180)*(90-t))
+  return(a)
+}
+z<- ac()
+z
+# calculo de reflectancia 
+#para determinar valores de Esun http://www.gisagmaps.com/landsat-8-atco/
+ref <- function(){
+ rf2<- ((pi)*rabs$B2*d^2)/(2067*z)
+ rf3<- ((pi)*rabs$B3*d^2)/(1893*z)
+ rf4<- ((pi)*rabs$B4*d^2)/(1603*z)
+ rf5<- ((pi)*rabs$B5*d^2)/(972.6*z)
+ rf6<- ((pi)*rabs$B6*d^2)/(245*z)
+ rf7<- ((pi)*rabs$B7*d^2)/(79.72*z)
+ return(list(rf2,rf3,rf4,rf5,rf6,rf7))
+}
+
+rfbs<-stack(ref())
+rfbs
+
+library(ggplot2)
+library(RStoolbox)
+summary(rfbs$B2)
+#mostrando los datos raster en el mapa.
+plot(rfbs$B2)
+
+#Combinacion de bandas.
+ggRGB(rfbs,r=3,g=2,b=1,stretch = "lin") + ggtitle("Combinacion bandas 321") 
+
+# Haciendo los calculos de inidice de vegetacion.
+index <- function(x,y){
+  ndvi <- (y - x ) / (y + x) 
+  return(ndvi)
+}
+NDVI<-index(rfbs$B3,rfbs$B4)
+
+hist(NDVI)
+  
+plot(NDVI, col = rev(terrain.colors(30)), main = 'NDVI con imagenes Landsat 8')
+
+# reclasificando en base a umbrales 
+vegr <- reclassify(NDVI, c(-0.2,-0.1,1, -0.1,0,2, 0,0.05,3, 0.05,0.1,4, 0.1,0.15,5,0.15,Inf,6))
+plot(vegr,col = rev(terrain.colors(5)), main = 'NDVI base a umbrales')
+
+vegr1 <- reclassify(NDVI, c(-0.2,-0.1,NA, -0.1,0,NA, 0,0.05,NA, 0.05,0.1,NA, 0.1,0.15,5,0.15,Inf,6))
+plot(vegr1,col = rev(terrain.colors(5)), main = 'NDVI base a umbrales')
+
+
+#Agrupando pixeles.
+veg1 <- calc(NDVI, function(x){x[x < -0.3] <- NA; return(x)})
+veg1 <- calc(veg1, function(x){x[x > 0.3] <- NA; return(x)})
+plot(veg1, main = 'Coberturas', col = rev(terrain.colors(8)))
+
+#Agrupando Pixeles en rango de valores
+veg2 <- calc(NDVI, function(x){x[x < 0.12] <- NA; return(x)})
+veg2 <- calc(veg2, function(x){x[x > 0.4] <- NA; return(x)})
+plot(veg2, main = 'Indicios de vegetacion \nNDVI > 0.12', col = rev(topo.colors(4)))
+
+```
+
+```{r}
+plotRGB(rfbs, r=4, g=3, b=2, axes=TRUE, stretch="lin", main="Landsat")
+plot(veg2, add=TRUE, legend=FALSE)
+
+plotRGB(rfbs, r=4, g=3, b=2, axes=FALSE, stretch="lin", main="Landsat")
+plot(vegr1, add=TRUE, legend=FALSE)
+```
+
